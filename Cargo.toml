@@ -1,0 +1,31 @@
+[package]
+name = "LowAudioLatency"
+description = ""
+version = "0.0.1"
+authors = ["spddl"]
+edition = "2021"
+
+[[bin]]
+name = "low_audio_latency"
+path = "src/main.rs"
+
+[profile.dev]
+opt-level = 0
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+
+[dependencies]
+
+[target.'cfg(windows)'.dependencies]
+windows-dll = "0.4.1"
+[dependencies.windows]
+version = "0.39.0"
+features = [
+    "Win32_Foundation",
+    "Win32_Media_Audio",
+    "Win32_System_Com_StructuredStorage",
+]

@@ -1,8 +1,15 @@
 # LowAudioLatency
+[![Downloads][1]][2] [![GitHub stars][3]][4]
+
+[1]: https://img.shields.io/github/downloads/spddl/LowAudioLatency/total.svg
+[2]: https://github.com/spddl/LowAudioLatency/releases "Downloads"
+
+[3]: https://img.shields.io/github/stars/spddl/LowAudioLatency.svg
+[4]: https://github.com/spddl/LowAudioLatency/stargazers "GitHub stars"
 
 only a rewrite of the original [miniant-git/REAL](https://github.com/miniant-git/REAL)
 
-The program checks the smallest buffer size and sets it.
+The program checks and sets the smallest possible buffer size for the default output and input device.
 If the smallest buffer size is the default buffer size, the program terminates itself.
 
 >**If a driver supports small buffer sizes (<10ms buffers), will all applications in Windows 10 automatically use small buffers to render and capture audio?**

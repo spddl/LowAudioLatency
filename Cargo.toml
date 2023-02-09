@@ -1,7 +1,7 @@
 [package]
 name = "LowAudioLatency"
 description = ""
-version = "0.0.2"
+version = "2.0.0"
 authors = ["spddl"]
 edition = "2021"
 
@@ -10,13 +10,17 @@ name = "low_audio_latency"
 path = "src/main.rs"
 
 [profile.dev]
-opt-level = 0
+# This isn't required for development builds, but makes development
+# build behavior match release builds. To enable unwinding panics
+# during development, simply remove this line.
+panic = "abort"     # Abort on panic
 
 [profile.release]
-opt-level = "s"
-lto = true
-codegen-units = 1
-panic = "abort"
+opt-level = "z"     # Optimize for size.
+lto = true          # Enable Link Time Optimization
+codegen-units = 1   # Reduce number of codegen units to increase optimizations.
+panic = "abort"     # Abort on panic
+strip = true        # Automatically strip symbols from the binary.
 
 [dependencies]
 
@@ -26,6 +30,8 @@ windows-dll = "0.4.1"
 [dependencies.windows]
 version = "0.44.0"
 features = [
+    "Win32_System_Com",
+    "Win32_UI_Shell_PropertiesSystem",
     "Win32_Foundation",
     "Win32_Media_Audio",
     "Win32_System_Com_StructuredStorage",

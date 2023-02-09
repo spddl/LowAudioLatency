@@ -4,7 +4,7 @@ version = 3
 
 [[package]]
 name = "LowAudioLatency"
-version = "0.0.2"
+version = "2.0.0"
 dependencies = [
  "windows",
  "windows-dll",

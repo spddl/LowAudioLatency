@@ -24,9 +24,6 @@ strip = true        # Automatically strip symbols from the binary.
 
 [dependencies]
 
-[target.'cfg(windows)'.dependencies]
-windows-dll = "0.4.1"
-
 [dependencies.windows]
 version = "0.44.0"
 features = [
@@ -35,4 +32,5 @@ features = [
     "Win32_Foundation",
     "Win32_Media_Audio",
     "Win32_System_Com_StructuredStorage",
+	"Win32_System_Threading"
 ]

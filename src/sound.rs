@@ -26,9 +26,13 @@ pub fn apply_audio_settings(dataflow: EDataFlow, role: ERole) {
             CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)
                 .expect("CoCreateInstance Failed");
 
-        let endpoint = device_enumerator
-            .GetDefaultAudioEndpoint(dataflow, role)
-            .expect("GetDefaultAudioEnpoint Failed");
+        let default_audio_endpoint = device_enumerator.GetDefaultAudioEndpoint(dataflow, role);
+        if default_audio_endpoint.is_err() {
+            println!("GetDefaultAudioEndpoint Failed: {:?}", default_audio_endpoint);
+            return;
+        }
+
+        let endpoint = default_audio_endpoint.unwrap();
 
         let property_store = endpoint
             .OpenPropertyStore(STGM_READ)

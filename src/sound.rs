@@ -1,15 +1,13 @@
-use windows::core::GUID;
 use windows::Win32::Media::Audio::{
     EDataFlow, ERole, IAudioClient3, IMMDeviceEnumerator, MMDeviceEnumerator,
 };
-use windows::Win32::System::Com::{
-    CoCreateInstance, CoInitialize, StructuredStorage, CLSCTX_ALL, STGM_READ, VT_LPWSTR,
-};
+use windows::Win32::System::Com::{CoCreateInstance, StructuredStorage, CLSCTX_ALL, STGM_READ};
+use windows::Win32::System::Variant::{VARENUM, VT_LPWSTR};
 use windows::Win32::UI::Shell::PropertiesSystem::{IPropertyStore, PROPERTYKEY};
 
 #[allow(non_upper_case_globals)]
 const PKEY_Device_FriendlyName: PROPERTYKEY = PROPERTYKEY {
-    fmtid: GUID::from_values(
+    fmtid: windows::core::GUID::from_values(
         0xa45c254e,
         0xdf1c,
         0x4efd,
@@ -18,31 +16,41 @@ const PKEY_Device_FriendlyName: PROPERTYKEY = PROPERTYKEY {
     pid: 14,
 };
 
-pub fn apply_audio_settings(dataflow: EDataFlow, role: ERole) {
+pub fn apply_audio_settings(
+    audiothread_tx: &std::sync::mpsc::Sender<bool>,
+    edataflow: EDataFlow,
+    erole: ERole,
+    p_min_period_in_frames: u32,
+) {
     unsafe {
-        CoInitialize(None).expect("CoInitialize Failed");
-
         let device_enumerator: IMMDeviceEnumerator =
             CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)
                 .expect("CoCreateInstance Failed");
 
-        let default_audio_endpoint = device_enumerator.GetDefaultAudioEndpoint(dataflow, role);
+        // https://learn.microsoft.com/en-us/windows/win32/api/mmdeviceapi/nf-mmdeviceapi-immdeviceenumerator-getdefaultaudioendpoint
+        let default_audio_endpoint = device_enumerator.GetDefaultAudioEndpoint(edataflow, erole);
         if default_audio_endpoint.is_err() {
-            println!("GetDefaultAudioEndpoint Failed: {:?}", default_audio_endpoint);
+            println!(
+                "GetDefaultAudioEndpoint Failed: {:?}",
+                default_audio_endpoint.unwrap_err()
+            );
+            audiothread_tx.send(false).unwrap();
             return;
         }
 
         let endpoint = default_audio_endpoint.unwrap();
 
-        let property_store = endpoint
-            .OpenPropertyStore(STGM_READ)
-            .expect("OpenPropertyStore Failed");
-
         let p_audio_client: IAudioClient3 = endpoint
             .Activate(CLSCTX_ALL, None)
             .expect("Activate Failed");
 
+        // https://learn.microsoft.com/en-us/windows/win32/api/audioclient/nf-audioclient-iaudioclient-getmixformat
         let p_format = p_audio_client.GetMixFormat().unwrap();
+
+        // https://learn.microsoft.com/en-us/windows/win32/api/mmdeviceapi/nf-mmdeviceapi-immdevice-openpropertystore
+        let property_store = endpoint
+            .OpenPropertyStore(STGM_READ)
+            .expect("OpenPropertyStore Failed");
 
         let friendly_name = get_property_vt_lpwstr(&property_store, &PKEY_Device_FriendlyName);
 
@@ -55,6 +63,7 @@ pub fn apply_audio_settings(dataflow: EDataFlow, role: ERole) {
         let mut pfundamentalperiodinframes: u32 = 0;
         let mut pminperiodinframes: u32 = 0;
         let mut pmaxperiodinframes: u32 = 0;
+
         // https://docs.microsoft.com/en-us/windows/win32/api/audioclient/nf-audioclient-iaudioclient3-getsharedmodeengineperiod
         p_audio_client
             .GetSharedModeEnginePeriod(
@@ -89,36 +98,49 @@ pub fn apply_audio_settings(dataflow: EDataFlow, role: ERole) {
             pmaxperiodinframes as f64 / n_samples_per_sec_float * 1000.0
         );
 
-        if pminperiodinframes >= pdefaultperiodinframes {
-            println!("no change necessary, exit");
-            return;
+        if p_min_period_in_frames == 0 {
+            if pminperiodinframes >= pdefaultperiodinframes {
+                println!("no change necessary, exit");
+                audiothread_tx.send(false).unwrap();
+                return;
+            }
+        } else {
+            pminperiodinframes = p_min_period_in_frames;
+            println!(
+                "Buffer new (min) size{:.>6} samples (about {} milliseconds)",
+                pminperiodinframes,
+                pminperiodinframes as f64 / n_samples_per_sec_float * 1000.0
+            );
         }
 
-        const NULL_GUID: GUID = GUID {
-            data1: 0,
-            data2: 0,
-            data3: 0,
-            data4: [0, 0, 0, 0, 0, 0, 0, 0],
-        };
+        // https://learn.microsoft.com/en-us/windows/win32/api/audioclient/nf-audioclient-iaudioclient3-initializesharedaudiostream
         p_audio_client
-            .InitializeSharedAudioStream(0, pminperiodinframes, p_format, Some(&NULL_GUID))
-            .expect("InitializeSharedAudioStream Failed");
+            .InitializeSharedAudioStream(0, pminperiodinframes, p_format, None)
+            .expect("p_audio_client.InitializeSharedAudioStream Failed");
 
-        p_audio_client.Start().expect("Start Failed");
+        // https://learn.microsoft.com/en-us/windows/win32/api/audioclient/nf-audioclient-iaudioclient-start
+        p_audio_client.Start().expect("p_audio_client.Start Failed");
+
+        // Thread is ready
+        audiothread_tx.send(true).unwrap();
 
         std::thread::park();
+
+        // unreachable code
+        // https://learn.microsoft.com/en-us/windows/win32/api/audioclient/nf-audioclient-iaudioclient-stop
+        p_audio_client.Stop().expect("Stop Failed");
     }
 }
 
 fn get_property_vt_lpwstr(store: &IPropertyStore, props_key: &PROPERTYKEY) -> String {
     #[allow(unused_assignments)]
     let mut result = String::from("");
+
     unsafe {
         let mut property_value = store.GetValue(props_key as *const _ as *const _).unwrap();
+        let prop_variant = property_value.as_raw().Anonymous.Anonymous;
 
-        let prop_variant = &property_value.Anonymous.Anonymous;
-
-        if prop_variant.vt != VT_LPWSTR {
+        if !VT_LPWSTR.eq(&VARENUM(prop_variant.vt)) {
             println!(
                 "property store produced invalid data: {:?}",
                 prop_variant.vt

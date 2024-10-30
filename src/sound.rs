@@ -1,8 +1,11 @@
+use std::os::windows::ffi::OsStringExt;
+use std::sync::mpsc::Sender;
+
 use windows::Win32::Media::Audio::{
     EDataFlow, ERole, IAudioClient3, IMMDeviceEnumerator, MMDeviceEnumerator,
 };
 use windows::Win32::System::Com::{CoCreateInstance, StructuredStorage, CLSCTX_ALL, STGM_READ};
-use windows::Win32::System::Variant::{VARENUM, VT_LPWSTR};
+use windows::Win32::System::Variant::VT_LPWSTR;
 use windows::Win32::UI::Shell::PropertiesSystem::{IPropertyStore, PROPERTYKEY};
 
 #[allow(non_upper_case_globals)]
@@ -17,7 +20,7 @@ const PKEY_Device_FriendlyName: PROPERTYKEY = PROPERTYKEY {
 };
 
 pub fn apply_audio_settings(
-    audiothread_tx: &std::sync::mpsc::Sender<bool>,
+    audiothread_tx: &Sender<bool>,
     edataflow: EDataFlow,
     erole: ERole,
     p_min_period_in_frames: u32,
@@ -133,40 +136,27 @@ pub fn apply_audio_settings(
 }
 
 fn get_property_vt_lpwstr(store: &IPropertyStore, props_key: &PROPERTYKEY) -> String {
-    #[allow(unused_assignments)]
-    let mut result = String::from("");
-
     unsafe {
         let mut property_value = store.GetValue(props_key as *const _ as *const _).unwrap();
         let prop_variant = property_value.as_raw().Anonymous.Anonymous;
 
-        if !VT_LPWSTR.eq(&VARENUM(prop_variant.vt)) {
+        if prop_variant.vt != VT_LPWSTR.0 as u16 {
             println!(
                 "property store produced invalid data: {:?}",
                 prop_variant.vt
             );
+            StructuredStorage::PropVariantClear(&mut property_value).ok();
+            return String::from("Invalid data");
         }
 
         let ptr_utf16 = *(&prop_variant.Anonymous as *const _ as *const *const u16);
+        let len = (0..).find(|&i| *ptr_utf16.add(i) == 0).unwrap_or(0);
 
-        // Find the length of the friendly name.
-        let mut len = 0;
-        while *ptr_utf16.offset(len) != 0 {
-            len += 1;
-        }
-
-        // Create the utf16 slice and convert it into a string.
-        let name_slice = std::slice::from_raw_parts(ptr_utf16, len as usize);
-        let name_os_string: std::ffi::OsString =
-            std::os::windows::ffi::OsStringExt::from_wide(name_slice);
-        let name_string = match name_os_string.into_string() {
-            Ok(string) => string,
-            Err(os_string) => os_string.to_string_lossy().into(),
-        };
+        let name_slice = std::slice::from_raw_parts(ptr_utf16, len);
+        let name_os_string = std::ffi::OsString::from_wide(name_slice);
 
         StructuredStorage::PropVariantClear(&mut property_value).ok();
 
-        result = name_string
+        name_os_string.to_string_lossy().into()
     }
-    result
 }

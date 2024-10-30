@@ -5,6 +5,7 @@ mod sound;
 
 use std::sync::mpsc::channel;
 use windows::Win32::Foundation::{CloseHandle, GetLastError, FALSE, HANDLE, LUID};
+use windows::Win32::Media::Audio::*;
 use windows::Win32::Security::{
     AdjustTokenPrivileges, GetTokenInformation, LookupPrivilegeValueW, TokenElevation,
     SE_INC_BASE_PRIORITY_NAME, SE_PRIVILEGE_ENABLED, TOKEN_ADJUST_PRIVILEGES, TOKEN_ELEVATION,
@@ -56,7 +57,7 @@ fn main() {
 
     let mut handles = Vec::new();
     let (audio_tx, audio_rx) = channel();
-    for data in opt.into_iter() {
+    for data in opt {
         let audiothread_tx = audio_tx.clone();
         handles.push(std::thread::spawn(move || {
             sound::apply_audio_settings(&audiothread_tx, data.0, data.1, data.2);
@@ -71,20 +72,18 @@ fn main() {
     unsafe {
         let hwnd = GetCurrentProcess();
         let infos = cpuset::get_system_cpu_set_information(hwnd);
-        let core0 = infos[0].assume_init().Anonymous.CpuSet; // we only need the first thread/core
-        let flags: u32 = core0.Anonymous1.AllFlags as u32;
+        if let Some(core0) = infos.first() {
+            let flags = core0.Anonymous.CpuSet.Anonymous1.AllFlags;
 
-        // This process is allocated a core in the CpuSet with realtime flag
-        if flags & SYSTEM_CPU_SET_INFORMATION_ALLOCATED_TO_TARGET_PROCESS != 0
-            && flags & SYSTEM_CPU_SET_INFORMATION_REALTIME != 0
-        {
-            println!("This process is allocated a core in the CpuSet with realtime flag");
-            enable_debug_privilege();
-            cpuset::get_system_cpu_set_information(hwnd);
-
-            let bitmask: Vec<u64> = vec![(1 << cpuset::number_of_processors()) - 1];
-            cpuset::system_allowed_cpu_sets_information(bitmask);
-            cpuset::get_system_cpu_set_information(hwnd);
+            // This process is allocated a core in the CpuSet with realtime flag
+            if flags & SYSTEM_CPU_SET_INFORMATION_ALLOCATED_TO_TARGET_PROCESS as u8 != 0
+                && flags & SYSTEM_CPU_SET_INFORMATION_REALTIME as u8 != 0
+            {
+                println!("This process is allocated a core in the CpuSet with realtime flag");
+                enable_debug_privilege();
+                let bitmask: Vec<u64> = vec![(1 << cpuset::number_of_processors()) - 1];
+                cpuset::system_allowed_cpu_sets_information(bitmask);
+            }
         }
     }
 
@@ -168,7 +167,7 @@ fn enable_debug_privilege() {
             panic!("AdjustTokenPrivileges failed. Error: {:?}", GetLastError());
         }
 
-        if !GetLastError().is_ok() {
+        if GetLastError().is_err() {
             eprintln!(
                 "AdjustTokenPrivileges succeeded, but the error result is failure. Likely \
                 the token does not have the specified privilege, which means you are not running \
@@ -182,15 +181,8 @@ fn enable_debug_privilege() {
     }
 }
 
-fn parse_args(
-    args: Vec<String>,
-) -> Vec<(
-    windows::Win32::Media::Audio::EDataFlow,
-    windows::Win32::Media::Audio::ERole,
-    u32,
-)> {
-    use windows::Win32::Media::Audio::*;
-    if args.len() == 0 {
+fn parse_args(args: Vec<String>) -> Vec<(EDataFlow, ERole, u32)> {
+    if args.is_empty() {
         return vec![
             (
                 eRender,  // EDataFlow
@@ -205,51 +197,24 @@ fn parse_args(
         ];
     }
 
-    let mut result = vec![];
-    for data in args.into_iter() {
-        let k: Vec<&str> = data.split(",").collect();
-
-        let mut edata_flow: EDataFlow = EDataFlow(0);
-        let mut erole: ERole = ERole(0);
-        let mut p_min_period_in_frames: u32 = 0;
-        for (pos, e) in k.iter().enumerate() {
-            match pos {
-                0 => {
-                    edata_flow = match e.parse::<i32>() {
-                        Ok(int) => EDataFlow(int),
-                        Err(_) => match e.to_lowercase().as_str() {
-                            "erender" => EDataFlow(0i32),  // eRender
-                            "ecapture" => EDataFlow(1i32), // eCapture
-                            "eall" => EDataFlow(2i32),     // eAll
-                            _ => panic!("Error parse EDataFlow"),
-                        },
-                    };
-                }
-                1 => {
-                    erole = match e.parse::<i32>() {
-                        Ok(int) => ERole(int),
-                        Err(_) => match e.to_lowercase().as_str() {
-                            "econsole" => ERole(0i32),        // eConsole
-                            "emultimedia" => ERole(1i32),     // eMultimedia
-                            "ecommunications" => ERole(2i32), // eCommunications
-                            _ => panic!("Error parse ERole"),
-                        },
-                    };
-                }
-                2 => {
-                    p_min_period_in_frames = match e.parse::<u32>() {
-                        Ok(int) => int,
-                        Err(_) => 0,
-                    };
-                }
-                _ => {
-                    println!("Err parse");
-                }
-            }
-        }
-
-        result.push((edata_flow, erole, p_min_period_in_frames))
-    }
-
-    return result;
+    args.iter()
+        .map(|data| {
+            let params: Vec<&str> = data.split(',').collect();
+            (
+                match params.get(0).unwrap_or(&"0").to_lowercase().as_str() {
+                    "erender" => eRender,
+                    "ecapture" => eCapture,
+                    "eall" => eAll,
+                    _ => EDataFlow(0), // eRender
+                },
+                match params.get(1).unwrap_or(&"0").to_lowercase().as_str() {
+                    "econsole" => eConsole,
+                    "emultimedia" => eMultimedia,
+                    "ecommunications" => eCommunications,
+                    _ => ERole(0), // eConsole
+                },
+                params.get(2).unwrap_or(&"0").parse().unwrap_or(0),
+            )
+        })
+        .collect()
 }

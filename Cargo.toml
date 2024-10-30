@@ -4,6 +4,7 @@ description = ""
 version = "3.0.0"
 authors = ["spddl"]
 edition = "2021"
+build = "build.rs"
 
 [[bin]]
 name = "low_audio_latency"
@@ -37,3 +38,6 @@ features = [
     "Win32_System_Variant",
     "Win32_UI_Shell_PropertiesSystem",
 ]
+
+[target.'cfg(target_os="windows")'.build-dependencies]
+winres = "^0.1"

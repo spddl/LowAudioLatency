@@ -13,7 +13,8 @@ use windows::Win32::Security::{
 };
 use windows::Win32::System::Com::{CoInitializeEx, COINIT_MULTITHREADED};
 use windows::Win32::System::SystemInformation::{
-    SYSTEM_CPU_SET_INFORMATION_ALLOCATED_TO_TARGET_PROCESS, SYSTEM_CPU_SET_INFORMATION_REALTIME,
+    SYSTEM_CPU_SET_INFORMATION_ALLOCATED, SYSTEM_CPU_SET_INFORMATION_ALLOCATED_TO_TARGET_PROCESS,
+    SYSTEM_CPU_SET_INFORMATION_REALTIME,
 };
 use windows::Win32::System::Threading::{
     GetCurrentProcess, OpenProcessToken, ProcessPowerThrottling, SetPriorityClass,
@@ -70,13 +71,13 @@ fn main() {
     }
 
     unsafe {
-        let hwnd = GetCurrentProcess();
-        let infos = cpuset::get_system_cpu_set_information(hwnd);
+        let infos = cpuset::get_system_cpu_set_information(GetCurrentProcess());
         if let Some(core0) = infos.first() {
             let flags = core0.Anonymous.CpuSet.Anonymous1.AllFlags;
 
             // This process is allocated a core in the CpuSet with realtime flag
-            if flags & SYSTEM_CPU_SET_INFORMATION_ALLOCATED_TO_TARGET_PROCESS as u8 != 0
+            if (flags & SYSTEM_CPU_SET_INFORMATION_ALLOCATED as u8 != 0
+                || flags & SYSTEM_CPU_SET_INFORMATION_ALLOCATED_TO_TARGET_PROCESS as u8 != 0)
                 && flags & SYSTEM_CPU_SET_INFORMATION_REALTIME as u8 != 0
             {
                 println!("This process is allocated a core in the CpuSet with realtime flag");
